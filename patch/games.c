@@ -2,26 +2,7 @@
  * The logic comes first (test/fw/test_games.py); the page below draws both on a bare
  * sheet (games_paint) and takes a game's keys in ringnav() before stock does (games_key). The state
  * is on the heap only while the page is open; the scratch holds its pointer. */
-#ifdef PEQ_HOST
-#include "offsets.inc"
-#include "peq.h"
-#else
 #include "navigation.h" /* the theme, its scheme and the final-colour rows */
-#endif
-
-#ifdef PEQ_HOST /* playback.c's and coverflow.c's on the device */
-unsigned games_seed = 1;
-unsigned rand_below(unsigned n) {
-    games_seed ^= games_seed << 13;
-    games_seed ^= games_seed >> 17;
-    games_seed ^= games_seed << 5;
-    return games_seed % n;
-}
-unsigned hash_bytes(unsigned h, const unsigned char *s, unsigned n) {
-    for (unsigned i = 0; i < n; ++i) h = (h ^ s[i]) * 16777619u;
-    return h;
-}
-#endif
 
 /* A save's first word is its magic and its last the FNV-1a of the rest; anything else reads as
  * no save, so a fresh game. */
@@ -495,7 +476,6 @@ int snake_step(struct snake *s) {
     return 1;
 }
 
-#ifndef PEQ_HOST
 #define GAMES_SUDOKU "/mnt/data/ringnav-sudoku"
 /* Bricks' file keeps the name the game had before 1.9.3, so a best score from then stays. */
 #define GAMES_BRICKS "/mnt/data/ringnav-vortex"
@@ -1390,4 +1370,3 @@ int games_open(void *ctx, event_t *event) {
     if (bad) sol_new(&g->sol);
     return 0;
 }
-#endif
