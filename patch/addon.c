@@ -2814,25 +2814,23 @@ void addon_open_id(const char *id) {
         }
 }
 
-/* Home's Shortcut (theme_engine.c): the present, unhidden app with this id, the card read again,
- * or -1. addon_open_app presses its row (a Streaming row's waiting for Smart Wi-Fi's link, as
+/* Home's Shortcut (theme_engine.c): addon_open_app presses the row of the present, unhidden app
+ * with this id, the card read again (a Streaming row's waiting for Smart Wi-Fi's link, as
  * addon_open does): -1 with none. addon_name_of names it as the last read found it (the card read
  * once when nothing has read it yet: it is asked as Home paints), its id with none. addon_sorted
  * puts the games' (game 1) or the other apps' slots in slots by name, for the Shortcut picker
  * (shortcut_pick.c): how many. */
-static int app_of(const char *id) {
+int addon_open_app(const char *id) {
     addon_scan();
     for (int i = 0; i < ap.n; ++i)
-        if (ap.a[i].present && !ap.a[i].hidden && !strcmp(ap.a[i].id, id)) return i;
+        if (ap.a[i].present && !ap.a[i].hidden && !strcmp(ap.a[i].id, id)) {
+            if (ap.a[i].row == ROW_STREAMING)
+                addon_open((void *)(long)i, 0);
+            else
+                press(i);
+            return 0;
+        }
     return -1;
-}
-int addon_open_app(const char *id) {
-    int i = app_of(id);
-    if (i >= 0 && ap.a[i].row == ROW_STREAMING)
-        addon_open((void *)(long)i, 0);
-    else if (i >= 0)
-        press(i);
-    return i < 0 ? -1 : 0;
 }
 const char *addon_name_of(const char *id) {
     if (!ap.n) slots_read();
