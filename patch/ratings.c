@@ -31,13 +31,12 @@ static struct {
 /* Now Playing's heart click (playing_page_init binds it to img_fav with the window): stock's My
  * Fav toggled for the playing track (manage_myfav), and the heart's image with it. */
 #define FAV_CLICK ((int (*)(void *, event_t *))0x53c968)
-/* The heart's rows in its image, which the fill's fifths cut: play_fav's 28 px (rows 3-23, its
- * foot clear, NP_ICON_PAD; test/build.py measures it) and the flat look's 32 px (tools/art.py
- * np_heart). */
+/* The heart's rows in its image, which the fill cuts: 21 from row 3 in play_fav's 28 px (its foot
+ * clear, NP_ICON_PAD; test/build.py measures it) and from row 6 in the flat look's 32 px
+ * (tools/art.py np_heart). */
 #define FAV_HEART_TOP 3
 #define FAV_HEART_ROWS 21
 #define FLAT_HEART_TOP 6
-#define FLAT_HEART_ROWS 21
 
 /* The songs' table, or with album the albums', written. */
 static int rate_io(int album) {
@@ -177,18 +176,18 @@ void rate_fill_paint(widget_t *w, canvas_t *canvas) {
     if (!w || w != ra.rate_fill || n < 1 || !P(canvas, CANVAS_LCD)) return;
     const char *image = "play_fav";
     char name[40];
-    int top = FAV_HEART_TOP, rows = FAV_HEART_ROWS;
+    int top = FAV_HEART_TOP;
     if (flat_pages()) {
         tk_snprintf(name, sizeof name, FLAT_ART "np_heart_on_%s", ipod_light() ? "l" : "d");
-        image = name, top = FLAT_HEART_TOP, rows = FLAT_HEART_ROWS;
+        image = name, top = FLAT_HEART_TOP;
     }
     unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
     if (widget_load_image(w, image, bitmap)) return;
     int bw = (int)bitmap[0], bh = (int)bitmap[1];
-    /* rows of play_fav's 21 per rating, set by eye on the Q2: 1 a sliver over the outline at the
+    /* rows of the heart's 21 per rating, set by eye on the Q2: 1 a sliver over the outline at the
      * tip, then even steps, 4 leaving a gap the eye sees at the top */
     static const unsigned char cut[4] = { 6, 9, 12, 16 };
-    int k = rows * cut[n - 1] / 21, y = top + rows - k;
+    int k = cut[n - 1], y = top + FAV_HEART_ROWS - k;
     int src[4] = { 0, y, bw, k },
         dst[4] = { (I(w, W_W) - bw) / 2, (I(w, W_H) - bh) / 2 + y, bw, k };
     canvas_draw_image(canvas, bitmap, src, dst);
