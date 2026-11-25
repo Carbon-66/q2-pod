@@ -1720,6 +1720,88 @@ m=ClassMachine(page='localclass_page',cls=0xf001,rows=2); m.word(m.row(1)+O['REC
 m.split=[m.song('Baroness'),m.song('STP')]; m.word(m.split[1]+O['REC_PATH'],m.string('/q/STP'))
 assert m.call(address=HOOKS['load_localclass_list'][0],args=(0xf003,0,0,0),gap=0)==3
 assert m.names(m.get(syms['p_deque_showlist']))==['Baroness','STP','Row 1']; passed()
+# ...and comes back unread (library_lists.c albums_again): a load with the list still on show, and the Return from an
+# album's songs (0xff10), which take a deque of their own while the Albums one waits for its page, run no query and
+# copy no row, and the page's title is set again; the songs' deque goes. A library write reads it again, and the page
+# closing (its EVT_DESTROY, handled once a page) frees a list waiting aside. Machines of its own: m stays the split's.
+def albums_kept():
+    def load(q,cls=0xf003): return q.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)
+    def read(q): return [c[0] for c in q.calls if c[0] in ('stock_localclass','deque_init_copy','deque_assign','_deque_push_back')]
+    def split_machine(kind=ClassMachine):
+        q=kind(page='localclass_page',cls=0xf001,rows=2); q.word(q.row(1)+O['REC_ALBUM'],q.string('Other'))
+        q.split=[q.song('Baroness'),q.song('STP')]; q.word(q.split[1]+O['REC_PATH'],q.string('/q/STP')); return q
+    q=split_machine(); assert load(q)==3
+    page=q.node('window','album_page'); q.nodes[q.wm]={'children':[page]}
+    shown=q.get(syms['p_deque_showlist']); rows=list(q.items(shown)); q.fetched=0
+    assert load(q)==3 and q.get(syms['p_deque_showlist'])==shown and q.items(shown)==rows and q.fetched==0
+    assert not read(q) and [c[1] for c in q.calls if c[0]=='music_nagvation_title']==[0xf003]
+    assert load(q,0xff10)==0  # stock's load: no songs here
+    aside=q.get(syms['p_deque_showlist']); assert aside!=shown and q.items(shown)==rows  # the Albums list, whole, waits
+    assert load(q)==3 and q.get(syms['p_deque_showlist'])==shown and q.items(shown)==rows and q.fetched==0
+    assert not read(q) and aside not in q.deqs
+    q.word(payload_syms['library_gen'],q.get(payload_syms['library_gen'])+2)  # a scan or a delete
+    load(q); assert 'stock_localclass' in read(q) and q.fetched==2  # stock's query and ALBUM_SQL's again
+    assert load(q,0xff10)==0 and q.get(syms['p_deque_showlist'])!=shown and shown in q.deqs  # aside again, same page
+    gone=[h for h in q.nodes[page]['handlers'] if h[0]==O['EVT_DESTROY']]; assert len(gone)==1
+    q.nested(gone[0][1],gone[0][2],q.event); assert shown not in q.deqs; passed()  # the page closed: nothing wants it
+    # With no Albums page open (Now Playing's Go to Album), an album's songs free the list as stock's load does.
+    q=split_machine(); shown=q.get(syms['p_deque_showlist']); load(q); load(q,0xff10)  # its window manager holds none
+    assert q.get(syms['p_deque_showlist'])==shown and not [c for c in q.calls if c[0]=='widget_on']; passed()
+    # A split without the memory for its table (album_rows' calloc) leaves the rows unsplit, and that list isn't kept.
+    class NoTableMachine(ClassMachine):
+        fail=1
+        def hook(self,u,address,size,unused):
+            if address==syms['calloc@GLIBC_2.0'] and self.fail and u.reg_read(REGS[1])==8:  # n + 1 row_t of 8 bytes
+                self.fail=0; return self.returns(0)
+            return super().hook(u,address,size,unused)
+    q=split_machine(NoTableMachine)
+    assert load(q)==2 and q.names(q.get(syms['p_deque_showlist']))==['Row 0','Row 1']  # stock's rows, unsplit
+    assert load(q)==3 and q.names(q.get(syms['p_deque_showlist']))==['Baroness','STP','Row 1']  # read again, split
+    q.fetched=0; assert load(q)==3 and q.fetched==0; passed()  # that one kept
+    # A scan rereads the card's folder markers before its writer moves library_gen: while stock's scan thread runs,
+    # the generation still the kept list's, an album's songs set nothing aside and an Albums load reads again.
+    q=split_machine(); assert load(q)==3; page=q.node('window','album_page'); q.nodes[q.wm]={'children':[page]}
+    shown=q.get(syms['p_deque_showlist']); q.word(O['SCAN_THREAD'],1); q.word(O['SCAN_DONE'],0)
+    load(q,0xff10); assert q.get(syms['p_deque_showlist'])==shown  # nothing set aside: the songs had the shared deque
+    load(q); assert 'stock_localclass' in read(q); passed()
+    # split_row copies the album artist onto the row stock's album_row made; with no memory for it the row would
+    # split from its album (album_cmp), so it counts as a failed read and the Albums load it was part of isn't kept.
+    class NoCopyMachine(ClassMachine):
+        fail=0
+        def hook(self,u,address,size,unused):
+            if address==syms['album_row']:  # stock's row callback: a record a row, as getAllAlbum's makes
+                self.deqs[self.get(syms['tools_pdeq_directory'])][1].append(self.copy('stSongInfo',self.song('Album')))
+                return self.returns(0)
+            if address==syms['strdup@GLIBC_2.0'] and self.fail and self.text(u.reg_read(REGS[0]))=='AA':
+                self.fail=0; return self.returns(0)
+            return super().hook(u,address,size,unused)
+    q=NoCopyMachine(page='localclass_page',cls=0xf001,rows=1); argv=q.alloc(20)
+    for i,v in enumerate(('9','Album','Artist','/q/a.flac','AA')): q.word(argv+4*i,q.string(v))
+    def copied(): q.call(address=payload_syms['split_row'],args=(0,5,argv,0),gap=0); return q.get(payload_syms['library_failed'])
+    k=copied(); q.fail=1; assert copied()==k+1 and copied()==k+1; passed()  # counted once, for the copy that failed
+    # library_query counts the reads a list must not be kept over: a query that failed, and a scope token it had no
+    # memory to expand, whose query read the whole library.
+    class FailingQueryMachine(LibraryQueryMachine):
+        answer=None; scope_fails=0
+        def hook(self,u,address,size,unused):
+            if address==syms['calloc@GLIBC_2.0'] and self.scope_fails and u.reg_read(REGS[0])==1:  # library_scope_query's
+                self.scope_fails-=1; return self.returns(0)
+            if address in self.tramps and self.answer is not None: return self.returns(self.answer)
+            return super().hook(u,address,size,unused)
+    lq=FailingQueryMachine(); lq.word(payload_syms['library_music'],1)
+    sql=lq.string('select id,album,songer,fileurl from songtable group by album COLLATE NOCASE')
+    def ask(): return lq.call(address=HOOKS['toolsQueryDbTable'][0],args=(lq.string('/mnt/data/database.db'),sql,123,1),gap=0)
+    def failed(): return lq.get(payload_syms['library_failed'])
+    k=failed(); ask(); assert failed()==k  # answered
+    lq.scope_fails=1; ask(); assert failed()==k+1 and '/*q2-library-scope*/1' in lq.sql  # unexpanded: the whole library
+    lq.answer=-1; ask(); assert failed()==k+2; passed()  # failed
+    # What a kept return costs the payload: its rows checked, a hash of each row's bytes (stock's deque_at, the mock's
+    # here, adds its own a row on the Q2), and no query or copy.
+    q=ClassMachine(page='localclass_page',cls=0xf001,rows=500); q.budget=5_000_000; assert load(q)==500
+    count=[0]; counter=q.u.hook_add(UC_HOOK_CODE,lambda *a: count.__setitem__(0,count[0]+1))
+    assert load(q)==500 and not read(q); q.u.hook_del(counter)
+    cost_line('albums return 500 kept',count[0]); passed()
+albums_kept()
 # Run the actual Library query wrapper against SQLite, with mixed music/book/podcast tags and Unknowns.
 # The flag is scoped by ringnav_localclass above; outside it (Coverflow, folders, Podcasts) SQL stays intact.
 lm=LibraryQueryMachine(); AA="ifnull(nullif(albumsonger,''),songer)"

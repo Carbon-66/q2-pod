@@ -683,6 +683,10 @@ int stock_usb_status_trampoline(void);
 
 /* library_lists.c */
 void album_view_toggle(void);
+/* ringnav_localclass's: Albums' kept list for a load of cls (its size, else 0), and after an Albums
+ * load from library_gen gen, whole when no read failed */
+int albums_again(int cls);
+void albums_made(int whole, unsigned gen);
 int era_menu(void *ctx, event_t *event);
 int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ctx);
 int long_songs(void *ctx, event_t *event);

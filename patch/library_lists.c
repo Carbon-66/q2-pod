@@ -847,3 +847,70 @@ void album_view_toggle(void) {
     I(album_modetype, 0) = !was;
     write_int_config(!was, "PLAYSET", "ALBUMTYPE");
 }
+
+/* Library -> Albums as its last whole load made it (navigation.c ringnav_localclass), with the
+ * library_gen and name order that load read. Stock's album page loads its list again each time it
+ * comes back on top (0x4a5b88): after an album's songs, and after Now Playing, the hold menu or a
+ * toast closes over it, grouping the whole library twice and sorting it each time. With songtable
+ * and the order unchanged and no scan running, that load would make the same list, so the rows
+ * still on show serve again: a row owns its strings, and nothing writes them after the load. Their
+ * size and an FNV-1a hash of every byte of them, pointers included, catch another list written
+ * over the shared deque by code that doesn't come through here; the hash is 32 bits, so a list of
+ * the same size could match by chance. An album's songs (0xff10) take the shared list, so while an
+ * Albums page is open under them the Albums list's deque waits aside for its Return and
+ * p_deque_showlist names a new one, nothing copied: as staged_into points tools_pdeq_directory
+ * elsewhere, since stock reads that pointer afresh at each use and keeps it nowhere (its 124
+ * loads, docs/internals.md). The deque aside goes when that page closes or another list loads. A
+ * load beside a writer or a scan, or one a failed read or memory fallback touched, is not kept. */
+static struct {
+    void *aside;
+    widget_t *page; /* the Albums page the deque aside waits for: its EVT_DESTROY frees it */
+    unsigned gen, n, hash;
+    unsigned char order;
+} al __attribute__((section(".scratch")));
+static unsigned albums_hash(void *list) {
+    unsigned h = FNV_SEED;
+    for (unsigned i = 0, n = deque_size(list); i < n; ++i)
+        h = hash_bytes(h, deque_at(list, i), REC_SIZE);
+    return h;
+}
+static int albums_gone(void *page, event_t *event) {
+    if (page != al.page) return 0;
+    if (al.aside) deque_destroy(al.aside);
+    al.aside = 0, al.page = 0;
+    return 0;
+}
+int albums_again(int cls) {
+    void **show = &P(p_deque_showlist, 0);
+    /* a scan rereads the card's folder markers before its writer moves library_gen */
+    int same = al.n && al.gen == library_gen && al.order == *(unsigned char *)NAME_ORDER &&
+               !library_scanning();
+    if (al.aside) { /* the Albums list back on show (read below if stale), or gone */
+        if (same && cls == 0xff10) return 0; /* its songs again: it waits on */
+        if (cls == CLASS_ALBUMS)
+            deque_destroy(*show), *show = al.aside;
+        else
+            deque_destroy(al.aside);
+        al.aside = 0;
+    }
+    if (!same || (cls != CLASS_ALBUMS && cls != 0xff10) || deque_size(*show) != al.n ||
+        albums_hash(*show) != al.hash)
+        return 0;
+    if (cls == 0xff10) { /* the album's songs are to take the shared list: it waits for its page */
+        widget_t *page = widget_lookup(window_manager(), "album_page", 0);
+        if (!page) return 0; /* none to come back to: stock's load frees it */
+        if (page != al.page) widget_on(al.page = page, EVT_DESTROY, albums_gone, page);
+        al.aside = *show, *show = song_list();
+        return 0;
+    }
+    /* as stock's load leaves them: the staging deque empty, the page's title its own again */
+    deque_clear(P(tools_pdeq_directory, 0));
+    music_nagvation_title(cls);
+    return (int)al.n;
+}
+/* Kept at gen, the generation it was read from: one a writer ran across never matches again. */
+void albums_made(int whole, unsigned gen) {
+    void *list = P(p_deque_showlist, 0);
+    al.n = whole && !library_scanning() ? deque_size(list) : 0;
+    if (al.n) al.gen = gen, al.order = *(unsigned char *)NAME_ORDER, al.hash = albums_hash(list);
+}
