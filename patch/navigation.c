@@ -135,12 +135,14 @@ static int library_query(int content, const char *db, const char *sql, void *row
         sql = aa;
     }
     /* no memory to expand it: the token alone is SQL's 1, the whole library (library_scope.c) */
-    char *expanded = sql && strstr(sql, LIBRARY_SCOPE_TOKEN) ? library_scope_query(sql) : 0;
+    int scoped = sql && strstr(sql, LIBRARY_SCOPE_TOKEN);
+    char *expanded = scoped ? library_scope_query(sql) : 0;
     const char *query = expanded ? expanded : sql;
     int result = content == 2 ? stock_sorted_query_trampoline(db, query, row, (int)arg)
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
     free(expanded);
+    if (result < 0 || (scoped && !expanded)) ++library_failed;
     return result;
 }
 int ringnav_library_query(const char *db, const char *sql, void *row, int sort) {
@@ -7692,9 +7694,12 @@ static int songs_load(void) {
 
 int ringnav_localclass(int cls) {
     I(g_artist_type, 0) = I(artist_type, 0) == 1;
+    int n = albums_again(cls); /* library_lists.c: Albums as its last whole load left it */
+    if (n) return n;
+    unsigned gen = library_gen, failed = library_failed;
     int saved = library_music;
     library_music = 1;
-    int n = cls == 0xf001 ? songs_load() : stock_localclass_trampoline(cls);
+    n = cls == 0xf001 ? songs_load() : stock_localclass_trampoline(cls);
     void *list = P(p_deque_showlist, 0), *dir = P(tools_pdeq_directory, 0), *a = album_opened();
     if (n > 0 && cls == 0xff20) n = music_records(list, 0);
     /* These stored lists bypass songtable too. Keep Discovery out of their displayed copies,
@@ -7728,6 +7733,7 @@ int ringnav_localclass(int cls) {
         if (empty) deque_pop_back(list), n--;
     }
     library_music = saved;
+    if (cls == CLASS_ALBUMS) albums_made(n > 0 && failed == library_failed, gen);
     if (n <= 0) { /* say so, not a black page; once the page that loads it is up */
         st.empty_kind = cls - CLASS_ALBUMS;
         timer_add(empty_toast, (void *)0, 0);

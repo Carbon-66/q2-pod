@@ -279,9 +279,9 @@ class Q2:
         self.preloads, self.gapless, self.sent, self.speeds = [], [], [], []
         self.random = random.Random(7)
         self.deques = Deques(fw)
-        self.pool, self.queue, self.showlist, self.staging = (self.deques.new() for _ in range(4))
+        self.pool, self.queue, showlist, self.staging = (self.deques.new() for _ in range(4))
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = self.queue
-        fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = self.showlist
+        fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = showlist
         fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value = self.staging
         C.c_uint64.from_address(O['MCL_POOL']).value = self.pool
         mcl.fd = mcl.lastpos = mcl.prepos = -1
@@ -455,6 +455,12 @@ class Q2:
 
     def directory(self):
         return self.fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value
+
+    @property
+    def showlist(self):
+        """The showlist's deque now, read at each use as stock reads it: while an album's songs show, the Albums
+        list's waits aside (library_lists.c albums_again)."""
+        return self.fw.var('fw_ctx_p_deque_showlist', C.c_uint).value
 
     def make_song(self, ctx, n, values, columns):
         row = {columns[i].decode(): (values[i] or b'').decode() for i in range(n)}
