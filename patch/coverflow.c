@@ -27,9 +27,6 @@ static int pick(void *ctx, event_t *event);
  * write it; each moves the generation before and after it runs, so a list queried meanwhile is
  * never kept. The scans run on stock's scan thread, and first walk the card for folder markers. */
 volatile unsigned library_gen __attribute__((section(".scratch"))); /* also Most Played's */
-/* Library reads that failed or fell back for want of memory (navigation.c library_query, split and
- * split_row): a list read while it moved is not kept (library_lists.c albums_made). */
-volatile unsigned library_failed __attribute__((section(".scratch")));
 static int library_write(int (*stock)(void *, void *), void *a, void *b) {
     ++library_gen;
     int result = stock(a, b);
@@ -1377,8 +1374,7 @@ static int split_row(void *a, int n, char **v, char **c) {
     unsigned k = deque_size(dir);
     album_row(a, 4, v, c);
     if (deque_size(dir) <= k) return 0;
-    /* without it the row splits from its album (album_cmp), so an Albums load isn't kept */
-    if (v[4] && !(P(deque_at(dir, k), REC_ALBUM_ARTIST) = strdup(v[4]))) ++library_failed;
+    if (v[4]) P(deque_at(dir, k), REC_ALBUM_ARTIST) = strdup(v[4]);
     if (n > 5) I(deque_at(dir, k), REC_YEAR) = v[5] ? atoi(v[5]) : 0;
     return 0;
 }
@@ -1470,7 +1466,7 @@ static void *split(void *stock, int artist) {
     if (!rows) rows = staged(rank_query, ALBUM_SQL, &n);
     unsigned m;
     row_t *v = album_rows(rows, &m, name_cmp, 1);
-    if (!v) return deque_destroy(rows), ++library_failed, stock;
+    if (!v) return deque_destroy(rows), stock;
     out = song_list();
     for (unsigned i = 0; i < deque_size(stock); ++i) {
         void *r = deque_at(stock, i);

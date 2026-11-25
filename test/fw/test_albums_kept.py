@@ -1,6 +1,5 @@
 """Library -> Albums keeps its list across its page's returns (library_lists.c albums_again, albums_made): stock's album
-page loads the list again each time it comes back on top, and while songtable and the name order are unchanged the list
-on show, or the one an album's songs set aside, is the list that load would make. On test_e2e_library's model: a real
+page loads the list again each time it comes back on top, and while songtable is unchanged the list on show, or the one an album's songs set aside, is the list that load would make. On test_e2e_library's model: a real
 sqlite3 songtable behind the hooked toolsQueryDbTable, each Albums query counted by kind."""
 import ctypes as C
 
@@ -228,21 +227,6 @@ def test_a_library_change_reads_the_library_again(lib, opened):
     assert count.take() == WHOLE and after != first and after == whole(q)
 
 
-def test_a_new_name_order_reads_the_library_again(lib):
-    """set_jplanguage's byte picks the comparator stock's name sort runs: a language changed since, so a new order."""
-    q, count = lib
-    order = C.c_ubyte.from_address(O['NAME_ORDER'])
-    saved = order.value
-    first = load(q)
-    count.take()
-    try:
-        order.value = not saved
-        assert load(q) == first and count.take() == WHOLE  # the model's sort is its own: the same rows, read again
-        assert load(q) == first and count.take() == NONE
-    finally:
-        order.value = saved
-
-
 @pytest.mark.parametrize('fails, late', [("ifnull(albumsonger,'') COLLATE NOCASE", False),
                                          ("ifnull(album,'')=''", False), ('select id,album,songer,fileurl from', True)],
                          ids=('split', 'unknown check', 'stock after its rows'))
@@ -262,6 +246,32 @@ def test_another_list_of_the_same_size_is_not_taken_for_it(lib):
     show[:] = list(reversed(show))  # another list of as many rows (a page that fills the shared list itself)
     count.take()
     assert load(q) == first and count.take() == WHOLE
+
+
+def test_another_list_of_the_same_size_set_aside_is_not_taken_for_it(lib):
+    """An album's songs check the size only: a list of as many rows goes aside, and the Return hashes it."""
+    q, count = lib
+    load(q)
+    show = q.deques[q.showlist]
+    show[:] = list(reversed(show))
+    q.open_album('First', 'Alpha')
+    count.take()
+    after = load(q)
+    assert count.take() == WHOLE and after == whole(q)
+
+
+def test_a_playlists_load_keeps_the_list_aside(lib):
+    """A song's Add to Playlist from an album: stock's playlist page loads 0xf00b into p_deque_playlist, not the
+    showlist, so the Albums list waits on for its Return."""
+    q, count = lib
+    first = load(q)
+    q.open_album('First', 'Alpha')
+    live = len(q.deques.lists)
+    q.fw.fn('albums_again', C.c_int, C.c_int)(0xf00b)
+    assert len(q.deques.lists) == live  # nothing freed
+    count.take()
+    assert load(q) == first and count.take() == NONE
+    assert len(q.deques.lists) == live - 1  # the songs' deque gone, the Albums list's the showlist again
 
 
 def test_a_load_during_a_scan_is_not_kept(lib):

@@ -52,6 +52,8 @@ extern int stock_dbquery_trampoline(const char *, const char *, void *, int),
  **************************************************************************************************/
 
 static int library_music __attribute__((section(".scratch")));
+/* failed library reads: an Albums load one touched isn't kept, library_lists.c albums_made */
+static unsigned library_failed __attribute__((section(".scratch")));
 static int library_first __attribute__((section(".scratch")));
 
 /* Failed exec in a forked child must not flush demo's copied stdio or run its exit handlers. */
@@ -135,14 +137,13 @@ static int library_query(int content, const char *db, const char *sql, void *row
         sql = aa;
     }
     /* no memory to expand it: the token alone is SQL's 1, the whole library (library_scope.c) */
-    int scoped = sql && strstr(sql, LIBRARY_SCOPE_TOKEN);
-    char *expanded = scoped ? library_scope_query(sql) : 0;
+    char *expanded = sql && strstr(sql, LIBRARY_SCOPE_TOKEN) ? library_scope_query(sql) : 0;
     const char *query = expanded ? expanded : sql;
     int result = content == 2 ? stock_sorted_query_trampoline(db, query, row, (int)arg)
                  : content    ? stock_content_query_trampoline(db, query, row, arg, sort)
                               : stock_dbquery_trampoline(db, query, row, (int)arg);
     free(expanded);
-    if (result < 0 || (scoped && !expanded)) ++library_failed;
+    if (result < 0) ++library_failed;
     return result;
 }
 int ringnav_library_query(const char *db, const char *sql, void *row, int sort) {

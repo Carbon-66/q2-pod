@@ -471,8 +471,6 @@ int library_counting(void);         /* coverflow.c: a song count reads songtable
 /* coverflow.c: the library's generation, one up each rewrite (Most Played's too); an album row's
  * tracks, its id and the length of a path's album folder */
 extern volatile unsigned library_gen;
-/* coverflow.c: library reads that failed or fell back for want of memory (library_lists.c) */
-extern volatile unsigned library_failed;
 /* durations.c: cache-only reads for Cover Flow; no file probes on the UI thread. */
 int duration_seconds(void *song);
 const char *duration_text(char *text, unsigned size, void *song);
