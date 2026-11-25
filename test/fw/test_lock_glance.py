@@ -10,6 +10,7 @@ from test_lockscreen import WALLS, AURORA, Bitmaps, Window, draws, handlers
 from test_upnext import Low
 from test_language import COPY, lang, lines  # noqa: F401  (lang: the fixture)
 from test_nav_loop import Clock
+from test_nav_painters import style_ink
 
 THEMES = ['0', '1', '2', '3']  # THEME's stored values: Minimal, Classic, Modern, Classic Modern
 STOCK = ('img_screensaver', 'view_timeinfo', 'clock_time', 'clock_date', 'label_battery', 'img_battery', 'pgbar_battery',
@@ -338,6 +339,57 @@ def test_light_mode_tints_the_cover_pale(fw, mcl, now):
     paper = fw.fn('flat_page', C.c_uint)()
     want = sum(((v + 3 * (paper >> s & 255)) // 4) << s for v, s in ((200, 16), (100, 8), (50, 0)))
     assert ground(fw, g)[1] == [((0, 0, 375, 320), rgba(want), 0)]
+
+
+INKS = {'scrlabel_title': 255, 'scrlabel_artist': 255, 'album': 209, 'place': 209, 'count': 209, 'time': 255, 'ampm': 255,
+        'day': 255, 'date': 255, 'battery': 209}  # each label's alpha beside the small clock
+
+
+@pytest.mark.parametrize('theme', THEMES)
+@pytest.mark.parametrize('background, queue', [('0', 1), ('1', 1), ('2', 1), ('1', 0)])
+@pytest.mark.parametrize('light', ['0', '1'])
+def test_every_label_is_the_slider_s_ink_and_reads_on_its_ground(fw, mcl, now, st, theme, background, queue, light):
+    """Each label's stored colour as stock's style lookup answers it while the label paints (ringnav_style_color):
+    white on the dark half's ground, the theme's own ink on Light Mode's pale one, on each of Background's grounds
+    behind the song and, with no queue, round the large clock."""
+    bitmaps, g = cover_window(fw, mcl, Cover(fw), theme=theme, queue=queue, LOCKGROUND=background, LIGHT=light)
+    seen, boxes = ground(fw, g)
+    under = bitmaps.pixels(seen[0][0])[0][0] if seen else boxes[0][1]
+    ink = fw.fn('flip_if', C.c_uint, C.c_int, C.c_uint)(int(light), 0xffffff)
+    want = {**INKS, **({} if queue else {'day': 220, 'battery': 220})}
+    drawn = {}
+    for name in want:
+        st('paint_w', C.c_void_p).value = g[name]
+        drawn[name] = style_ink(fw, g.win.props('widget_set_prop_int', name)['style:normal:text_color'] & 0xffffffff)
+    assert drawn == {name: rgba(ink, a) for name, a in want.items()}
+    bright = lambda c: sum(c >> s & 255 for s in (0, 8, 16))
+    assert abs(bright(ink) - bright(under)) > 3 * 0x60
+
+
+@pytest.mark.parametrize('background', ['0', '2'])
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_half_turning_under_the_window_tones_the_ground_again(fw, mcl, now, st, background, light):
+    """The half turns (Light Mode's Auto, at 7:00 or 19:00) with the window up, its song and cover the same: the next
+    look samples the ground again, toned for the new half, and repaints, so a label's ink, the hook's for that half,
+    still reads on it."""
+    cover = Cover(fw)
+    bitmaps, g = cover_window(fw, mcl, cover, LOCKGROUND=background, LIGHT=str(1 - light))
+    tick(fw)
+    loads, paints = cover.loads, len(fw.calls('widget_invalidate_force'))
+    st('light').value = light
+    tick(fw)
+    assert cover.loads == loads + 1 and len(fw.calls('widget_invalidate_force')) == paints + 1
+    seen, boxes = ground(fw, g)
+    under = bitmaps.pixels(seen[0][0])[0][0] if seen else boxes[0][1]
+    paper = fw.fn('flat_page', C.c_uint)()
+    tint = sum(((v + 3 * (paper >> s & 255)) // 4) << s for v, s in ((200, 16), (100, 8), (50, 0)))
+    assert under == (rgba(tint) if light else DARK_TONE)
+    st('paint_w', C.c_void_p).value = g['time']
+    ink = style_ink(fw, g.win.props('widget_set_prop_int', 'time')['style:normal:text_color'] & 0xffffffff)
+    bright = lambda c: sum(c >> s & 255 for s in (0, 8, 16))
+    assert abs(bright(ink) - bright(under)) > 3 * 0x60
+    tick(fw)
+    assert cover.loads == loads + 1  # the same half: kept
 
 
 def test_a_cover_that_can_t_be_read_is_the_plain_ground_and_not_read_again(fw, mcl, now):

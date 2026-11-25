@@ -75,10 +75,10 @@ static struct {
     int flip, hold, hold_x, hold_y, fade, turned;
     unsigned hold_timer, fade_timer, fade_at;
     /* the ground behind the song, 0xRRGGBB, from the cover of np_art_key() art_key (sampled 0:
-     * none, the plain ground then); with Background: Blurred Cover, the cover blurred, GL_W x
-     * GL_H, made only then and freed with the window */
+     * none, the plain ground then), toned for the half paper; with Background: Blurred Cover, the
+     * cover blurred, GL_W x GL_H, made only then and freed with the window */
     unsigned ground, art_key;
-    int sampled, resample;
+    int sampled, resample, paper;
     void *blur;
 } gl __attribute__((section(".scratch")));
 
@@ -112,13 +112,14 @@ static void face(widget_t *w) {
     lock_face(w, face_name(script_face(theme()->font[v >> 8], widget_get_text(w), -1, &px)), px);
 }
 /* A label: its box, role's face at px, side, and the dark half's white at alpha a, which Light
- * Mode turns to the theme's own ink as on its pages (text_ink). */
+ * Mode turns to the theme's own ink as on its pages (page_label: plain white, not text_ink's final
+ * one, which is white in either half). */
 static void put(widget_t *w, int x, int y, int ww, int h, int px, int role, const char *align,
                 unsigned a) {
     if (!w) return;
-    slider_label(w, x, y, ww, h, px, "default");
+    page_label(w, x, y, ww, h, px, "default", 0xffffffu);
     widget_set_prop_str(w, "style:normal:text_align_h", align);
-    if (a != 0xff) text_ink(w, a << 24 | 0xffffffu, INK_LABEL);
+    if (a != 0xff) widget_set_prop_int(w, "style:normal:text_color", (int)(a << 24 | 0xffffffu));
     widget_set_prop_int(w, "_glance", role << 8 | px);
     widget_set_prop_int(w, "_ringnav_box", 0);
     face(w);
@@ -207,8 +208,8 @@ static int blur(const unsigned char *data, const unsigned char *o, unsigned w, u
 
 /* The ground behind the song from the playing cover (the lock window's own img_playcover image, as
  * stock loaded it): an 8 x 8 lattice of its pixels, each over the half's paper, averaged and
- * tone()'d; and with Blurred Cover the blur. Once per cover key: a cover that can't be read leaves
- * the plain ground until the key moves. The decoded cover is let go after. */
+ * tone()'d; and with Blurred Cover the blur. Once per cover key and half (sync): a cover that
+ * can't be read leaves the plain ground until either moves. The decoded cover is let go after. */
 static void sample(void) {
     static const unsigned char at[4][4] = BITMAP_RGBA_AT;
     const char *name = gl.cover ? widget_get_prop_str(gl.cover, "image", "") : "";
@@ -347,10 +348,13 @@ static void sync(int force) {
         retext(gl.battery, pct);
     if (song) {
         /* another song, or its cover file written since (np_art_key holds the file's size and
-         * time): every song's cover shares one file name, so the ground is sampled again */
+         * time): every song's cover shares one file name, so the ground is sampled again; and
+         * when the half turned under the window (Light Mode's Auto): the ground is toned for its
+         * half, and a label's ink turns with the half as it paints */
         unsigned key = np_art_key();
-        if (gl.resample || key != gl.art_key) {
-            gl.art_key = key, gl.resample = 0, changed = 1;
+        int paper = ipod_paper();
+        if (gl.resample || key != gl.art_key || paper != gl.paper) {
+            gl.art_key = key, gl.paper = paper, gl.resample = 0, changed = 1;
             sample();
         }
         song_lines();
