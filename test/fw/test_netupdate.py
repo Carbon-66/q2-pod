@@ -3,7 +3,6 @@ removing and checking apps, with the card and the network stubbed; then System U
 Store's jobs end to end, a press to the toast, on a card whose busybox runs on its files."""
 import ctypes as C
 import fnmatch
-import hashlib
 import io
 import pathlib
 import random
@@ -306,8 +305,7 @@ def test_each_real_release_truncated(fw):
             release(fw, data[:k])
 
 
-def sha(data):
-    return hashlib.sha256(data).hexdigest()
+sha = host.tools_build.sha
 
 
 def digest(data):
