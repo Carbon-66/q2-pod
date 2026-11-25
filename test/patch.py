@@ -12028,7 +12028,6 @@ def lock_cl(large=0,light='1',picture='screensaver_default',battery='1',status=0
     assert m.call(address=HOOKS['saverscreen_page_init'][0],args=(m.top,0,0,0),gap=0)==0
     m.image_size=(96,96); return m,w
 def lock_paint(m,w): blank(m); m.call(address=HOOKS['widget_on_paint_border'][0],args=(w['img_screensaver'],m.canvas,0,0),gap=0,count=400000); return m.image_draws
-TRAY_ROWS=(0x474e58,0x14161b)
 # The info screen under Classic, Standard: the page, no bar of its own (it paints the real one, below), face at 29,54, both trays; date's format "MMM D, Y"; no shade.
 lk,w=lock_cl(); box_=lambda n: screen_box(lk,w[n]); font_=lambda n:(lk.nodes[w[n]]['style:normal:font_name'],lk.nodes[w[n]]['style:normal:font_size'])
 assert lk.nodes[w['clock_date']]['format']=='MMM D, Y' and box_('clock_date')==(0,0,187,25) and lk.nodes[w['view_shade']]['visible']==0
