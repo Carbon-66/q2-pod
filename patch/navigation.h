@@ -593,7 +593,7 @@ int shortcut(void);
 const char *shortcut_app(void);
 extern const char *const shortcut_names[];
 void shortcut_set(int v, const char *id);
-int shortcut_is_app(void), shortcut_app_there(void), ipod_home_shown(void);
+int shortcut_app_there(void);
 unsigned tone_of(const unsigned *a, int tone);
 extern const char *const accent_names[];
 extern const char *const np_pages[];
