@@ -84,7 +84,7 @@ widget_t *store_tabs(widget_t *page, widget_t *view, const char *const *names, v
  * field_key; looking past it (smart_wifi.c page_in_use) would lift that. */
 int store_tabs_key(widget_t *top, unsigned key) {
     if (!tabs_page || top != tabs_page || (key != KEY_BACK_BTN && key != KEY_FWD_BTN)) return 0;
-    if (tab_pick) tab_pick(key == KEY_FWD_BTN);
+    tab_pick(key == KEY_FWD_BTN); /* set with tabs_page */
     return 1;
 }
 
@@ -143,7 +143,6 @@ static void paint_strip(widget_t *w, canvas_t *canvas) {
     const theme_t *T = theme();
     int h = I(w, W_H), tab = widget_get_prop_int(w, "_tab", 0),
         n[2] = { widget_get_prop_int(w, "_b0", 0), widget_get_prop_int(w, "_b1", 0) };
-    const char *const *names = tab_names;
     canvas_set_fill_color(canvas, rgba(0, 255)); /* the paper */
     canvas_fill_rect(canvas, 0, 0, 375, h);
     if (T->painter[PAINT_SELECTION] == SEL_CARD) { /* Minimal: the names, the open one dotted */
@@ -153,7 +152,7 @@ static void paint_strip(widget_t *w, canvas_t *canvas) {
                 rect_t dot = { x - 14, h / 2 - 2, 5, 5 };
                 fill_box(canvas, &dot, rgba(0xffffff, 255), 3);
             }
-            int tw = text_at(canvas, tr(names[i]), x, 0, h, 17,
+            int tw = text_at(canvas, tr(tab_names[i]), x, 0, h, 17,
                              rgba(i == tab ? 0xffffff : 0x5c5c5c, 255), LEFT);
             if (!i) x = second_x = x + tw + NAME_GAP > GAMES_X ? x + tw + NAME_GAP : GAMES_X;
         }
@@ -193,7 +192,8 @@ static void paint_strip(widget_t *w, canvas_t *canvas) {
         unsigned c = i == tab ? ink : classic ? 0xffffff : band;
         ui_ink_raw((i == tab || !classic) && raw);
         rect_t r = { cx - half / 2, y, half, SEG_H };
-        caption(canvas, tr(names[i]), r.x, r.y, r.w, r.h, face_px(classic ? 17 : 16), rgba(c, 255));
+        caption(canvas, tr(tab_names[i]), r.x, r.y, r.w, r.h, face_px(classic ? 17 : 16),
+                rgba(c, 255));
         ui_ink_raw(0);
         if (n[i]) badge(canvas, SEG_X + half * (i + 1) - 10, y + SEG_H / 2, n[i], i == tab);
     }
@@ -216,7 +216,7 @@ static void paint_row(widget_t *w, canvas_t *canvas, int state) {
 
 /* ringnav_paint, every widget after stock painted it: the App Store's strip and its apps' rows. */
 void store_paint(widget_t *w, canvas_t *canvas) {
-    if (!tabs_page || !tab_names || !P(canvas, CANVAS_LCD)) return;
+    if (!tabs_page || !P(canvas, CANVAS_LCD)) return;
     int h = I(w, W_H);
     if (h != strip_h() && h != page_h(64)) return; /* no prop lookups for other widgets */
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
