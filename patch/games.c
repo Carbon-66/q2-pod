@@ -1,5 +1,5 @@
 /* Games (docs/internals.md#games), iPod: the Library's Games, Sudoku, Bricks, Solitaire and Snake.
- * The logic comes first, host-tested (test/peq.py games_check); the page below draws both on a bare
+ * The logic comes first (test/fw/test_games.py); the page below draws both on a bare
  * sheet (games_paint) and takes a game's keys in ringnav() before stock does (games_key). The state
  * is on the heap only while the page is open; the scratch holds its pointer. */
 #ifdef PEQ_HOST

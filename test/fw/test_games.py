@@ -605,6 +605,33 @@ def test_a_bounce_inside_the_rings_never_lands_past_a_ring(fw):
         assert all(0 <= b <= 0xffff for b in v.brick)
 
 
+def test_at_full_speed_every_launch_angle_hits_the_outer_ring_first(fw):
+    g = api(fw)
+    for pa in range(0, 1024, 7):
+        v = fresh(g, AIM)
+        v.level = 99
+        g.bricks_step(r(v), pa - 768)
+        g.bricks_launch(r(v))
+        assert abs(math.hypot(v.vx, v.vy) - VMAX) < 64
+        for _ in range(2000):
+            if v.score:
+                break
+            g.bricks_step(r(v), 0)
+        assert v.score == 10 and v.brick[:2] == [0xffff] * 2 and bin(v.brick[2]).count('1') == 15, pa
+
+
+def test_the_same_inputs_play_the_same_game(fw):
+    g = api(fw)
+    def play(n):
+        rng, v = random.Random(n), fresh(g, AIM)
+        for _ in range(20000):
+            if v.state == AIM:
+                g.bricks_launch(r(v))
+            g.bricks_step(r(v), rng.randrange(-9, 10))
+        return bytes(v)
+    assert play(1) == play(1) != play(2)
+
+
 # Solitaire
 
 def pile(s, p):
@@ -919,6 +946,42 @@ def test_sol_finish_waits_for_the_stock_the_waste_and_a_face_down_card(fw):
     assert bytes(t) == want
 
 
+def sound(s):
+    """Every card once; a column face down, then a run down in alternate colours; a foundation up from its Ace."""
+    assert sorted(c & ~UP for p in range(PILES) for c in pile(s, p)) == list(range(52))
+    for p in range(TABLEAU, PILES):
+        c = pile(s, p)
+        d = next((i for i, x in enumerate(c) if x & UP), len(c))
+        assert all(x & UP for x in c[d:]) and (not c or c[-1] & UP)
+        assert all(fits_column(b & ~UP, a & ~UP) for a, b in zip(c[d:], c[d + 1:]))
+    for p in range(FOUND, TABLEAU):
+        f = [c & ~UP for c in pile(s, p)]
+        assert not f or rank(f[0]) == 0 and f == list(range(f[0], f[0] + len(f)))
+
+
+def test_random_play_keeps_every_card_once_and_every_pile_sound_and_wins_some(fw):
+    g, won = api(fw), 0
+    for n in range(100):
+        seed(fw, n * 2654435761 % 2**32)
+        s = Sol()
+        g.sol_new(r(s))
+        rng = random.Random(n)
+        for _ in range(400):
+            moved = [(a, b) for a in range(WASTE, PILES) for b in range(FOUND, PILES)
+                     if g.sol_move(r(Sol.from_buffer_copy(s)), a, b)]
+            home = [m for m in moved if m[1] < TABLEAU <= m[0] or m[0] == WASTE]  # home first, then the waste
+            if moved and rng.random() < .8:
+                g.sol_move(r(s), *rng.choice(home or moved))
+            else:
+                g.sol_draw(r(s))
+            g.sol_finish(r(s))
+            sound(s)
+            if g.sol_won(r(s)):
+                won += 1
+                break
+    assert won > 10, won
+
+
 # Snake
 
 def body(s):
@@ -934,6 +997,13 @@ def snake(g, cells=None, d=1, food=399):
             s.body[i] = c
     s.dir, s.food = d, food
     return s
+
+
+def test_a_new_snake(fw):
+    g = api(fw)
+    s = Snake()
+    g.snake_new(r(s))
+    assert (body(s), s.dir, s.state, s.score) == ([207, 208, 209], 1, RUNNING, 0) and s.food not in body(s)
 
 
 def test_snake_turns_are_relative_and_wrap(fw):
@@ -1056,6 +1126,14 @@ def test_food_lands_only_on_free_cells_and_reaches_them_all(fw):
         g.sn_food(r(s))
         seen.add(s.food)
     assert not seen & {207, 208, 209} and len(seen) == 397
+
+
+@pytest.mark.parametrize('free', (2, 57, 399, 380))
+def test_eating_with_one_cell_left_free_puts_the_apple_there(fw, free):
+    g = api(fw)
+    seed(fw, free)
+    s = snake(g, [c for c in range(400) if c not in (0, 1, free)] + [1], d=3, food=0)  # the head at 1, the apple at 0
+    assert g.snake_step(r(s)) == 1 and s.len == 399 and s.food == free and s.state == RUNNING
 
 
 # The page: its save files, keys, timers. page_open and the list go to stubs, so a page is a number.
