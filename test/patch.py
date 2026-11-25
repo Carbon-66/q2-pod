@@ -1727,8 +1727,8 @@ assert m.names(m.get(syms['p_deque_showlist']))==['Baroness','STP','Row 1']; pas
 def albums_kept():
     def load(q,cls=0xf003): return q.call(address=HOOKS['load_localclass_list'][0],args=(cls,0,0,0),gap=0)
     def read(q): return [c[0] for c in q.calls if c[0] in ('stock_localclass','deque_init_copy','deque_assign','_deque_push_back')]
-    def split_machine(kind=ClassMachine):
-        q=kind(page='localclass_page',cls=0xf001,rows=2); q.word(q.row(1)+O['REC_ALBUM'],q.string('Other'))
+    def split_machine():
+        q=ClassMachine(page='localclass_page',cls=0xf001,rows=2); q.word(q.row(1)+O['REC_ALBUM'],q.string('Other'))
         q.split=[q.song('Baroness'),q.song('STP')]; q.word(q.split[1]+O['REC_PATH'],q.string('/q/STP')); return q
     q=split_machine(); assert load(q)==3
     page=q.node('window','album_page'); q.nodes[q.wm]={'children':[page]}

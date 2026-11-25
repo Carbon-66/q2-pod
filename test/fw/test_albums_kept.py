@@ -1,6 +1,7 @@
 """Library -> Albums keeps its list across its page's returns (library_lists.c albums_again, albums_made): stock's album
-page loads the list again each time it comes back on top, and while songtable is unchanged the list on show, or the one an album's songs set aside, is the list that load would make. On test_e2e_library's model: a real
-sqlite3 songtable behind the hooked toolsQueryDbTable, each Albums query counted by kind."""
+page loads the list again each time it comes back on top, and while songtable is unchanged the list on show, or the one
+an album's songs set aside, is the list that load would make. On test_e2e_library's model: a real sqlite3 songtable
+behind the hooked toolsQueryDbTable, each Albums query counted by kind."""
 import ctypes as C
 
 import pytest
@@ -254,7 +255,9 @@ def test_another_list_of_the_same_size_set_aside_is_not_taken_for_it(lib):
     load(q)
     show = q.deques[q.showlist]
     show[:] = list(reversed(show))
+    shown = q.showlist
     q.open_album('First', 'Alpha')
+    assert q.showlist != shown  # it went aside: the songs have a deque of their own
     count.take()
     after = load(q)
     assert count.take() == WHOLE and after == whole(q)

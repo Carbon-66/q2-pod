@@ -860,9 +860,10 @@ void album_view_toggle(void) {
  * open under them the Albums list's deque waits aside for its Return and p_deque_showlist names a
  * new one, nothing copied: as staged_into points tools_pdeq_directory elsewhere, since stock reads
  * that pointer afresh at each use and keeps it nowhere (its 124 loads, docs/internals.md). The
- * deque aside goes when that page closes or another list loads, Playlists' excepted. A load beside
- * a writer or a scan, or one a failed query touched, is not kept. ponytail: the list aside is held
- * while pages opened over the album's songs are up, as much memory again (internals.md). */
+ * deque aside goes when that page closes or another list loads, Playlists' excepted. A load during
+ * a scan, or one a failed query touched, is not kept, and a writer's step of library_gen retires
+ * any list kept. ponytail: the list aside is held while pages opened over the album's songs are
+ * up, as much memory again (internals.md). */
 static struct {
     void *aside;
     widget_t *page; /* the Albums page the deque aside waits for: its EVT_DESTROY frees it */
