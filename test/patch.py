@@ -3682,8 +3682,8 @@ def other(m): m.top=m.node('window','home_page')
 def back(m): m.top=m.win
 def dark(m,on=0): m.byte(syms['g_backlight_status'],on)
 def touch(m,on=1): m.pressed=on
-def bare(m,on=0): m.lyric_size=9 if on else 0
-for off,on in ((other,back),(dark,lambda m: dark(m,1)),(touch,lambda m: touch(m,0)),(bare,lambda m: bare(m,1))):
+def no_lyrics(m,on=0): m.lyric_size=9 if on else 0
+for off,on in ((other,back),(dark,lambda m: dark(m,1)),(touch,lambda m: touch(m,0)),(no_lyrics,lambda m: no_lyrics(m,1))):
     m=lyric_page(); loop(m); assert raw(m)==1
     off(m); loop(m,-28); settle(m); assert raw(m)==0 and y(m)==0,off
     m.word(payload_syms['wheel_travel'],-99&0xffffffff); on(m); loop(m); assert raw(m)==1 and settle(m)[-1]==0,off
