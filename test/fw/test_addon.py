@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, SPOT_FAIL, SPOT_NOSOCK, SPOT_OK, Config, Deques, Dirent, Game, block, card_fread, claim, high_halves, libc, text
+from conftest import O, SPOT_FAIL, SPOT_NOSOCK, SPOT_OK, Config, Deques, Dirent, Game, block, card_fread, claim, fake_lists, high_halves, libc, text
 from fuzz import hostile
 from test_coverflow import png  # an icon's header
 from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh  # test_netupdate.py keeps netupdate.c's App Store mirror
@@ -2838,30 +2838,8 @@ class Page:
         self.world.files[b'/tmp/q2-foo'] = b'1234'
         self.page, self.view = block(fw, size=4096), block(fw, size=4096)  # widgets' bytes, all zero
         self.ap, self.pg, self.req = ap(fw), fw.var('addon__pg', Pg), fw.var('addon__req', Req)
-        def timer(*_):
-            self.timers += 1
-            return self.timers
-        def lists(*_):
-            self.drawn = 0
-            return self.view
-        def row(*_):
-            self.drawn += 1
-            return self.view
-        def toast(path, info, *_):
-            self.toasts.append(C.string_at(info + 8))
-        def prop(w, name, default, *_):
-            key = C.string_at(name)
-            return self.sel if key == b'_ringnav_index' else self.y if key == b'yoffset' else default
-        fw.mock('fw_pthread_create', lambda *_: 0)
-        fw.mock('timer_add', timer)
-        fw.mock('window_create', lambda *_: self.page)
-        fw.mock('scroll_view_create', lists)
-        fw.mock('list_item_create', row)
-        fw.mock('widget_get_child', lambda *_: self.view)
-        fw.mock('widget_lookup', lambda *_: self.view)
-        fw.mock('navigator_to_with_context', toast)
+        fake_lists(self, fw)
         fw.mock('navigator_back', lambda *_: setattr(self, 'backs', self.backs + 1))
-        fw.mock('widget_get_prop_int', prop)
         scan(fw)
         if opens:
             fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)

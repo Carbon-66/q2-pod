@@ -160,6 +160,32 @@ def block(fw, data=b'', size=None):
     C.memmove(p, data, len(data))
     return p
 
+def fake_lists(ui, fw):
+    """A list page's widgets on ui (test_streaming's Browser, test_addon's Page): ui.page and ui.view as every
+    widget, ui.timers counted, ui.drawn the rows since the last list, toasts' texts in ui.toasts, ui.sel the
+    selected row and ui.y, if it has one, the scroll. No worker pthread starts."""
+    def timer(*_):
+        ui.timers += 1
+        return ui.timers
+    def lists(*_):
+        ui.drawn = 0
+        return ui.view
+    def row(*_):
+        ui.drawn += 1
+        return ui.view
+    def prop(w, name, default, *_):
+        key = C.string_at(name)
+        return ui.sel if key == b'_ringnav_index' else getattr(ui, 'y', default) if key == b'yoffset' else default
+    fw.mock('fw_pthread_create', lambda *_: 0)
+    fw.mock('timer_add', timer)
+    fw.mock('window_create', lambda *_: ui.page)
+    fw.mock('scroll_view_create', lists)
+    fw.mock('list_item_create', row)
+    fw.mock('widget_get_child', lambda *_: ui.view)
+    fw.mock('widget_lookup', lambda *_: ui.view)
+    fw.mock('navigator_to_with_context', lambda path, info, *_: ui.toasts.append(C.string_at(info + 8)))
+    fw.mock('widget_get_prop_int', prop)
+
 def claim(address):
     """A page at one of stock's fixed addresses, mapped if free, made writable and executable (a test's
     stand-in code goes there) if conftest's own map holds it."""
