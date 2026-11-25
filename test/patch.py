@@ -1459,12 +1459,13 @@ for cls,flag in ((0xf001,0),(0xf00a,1)):
     m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run(2) is None
     assert [c[1] for c in m.calls if c[0]=='deleteMusicFromFav']==[m.row(0)] and m.u.mem_read(syms['g_delete_flag'],1)[0]==flag
     passed()
-# Add to playlist opens the stock playlist page in its add mode (context: 1 << 16 | class) with the
-# row selected, as the batch Add to playlist does; the page adds the row's songs itself.
-for kw,row in (({},3),({'cls':0xf003,'page':'album_page'},5)):
+# Add to playlist opens the stock playlist page in its add mode (context: 1 << 16 | class). A song's
+# row is selected first, as the batch Add to playlist does, and the page adds it itself; an album's
+# row selects nothing: its own songs are added at the pick (playlists.c pl_add_songs).
+for kw,row,chosen in (({},3,[('batch_init_selectrecord',20),('batch_set_selectitem',1)]),({'cls':0xf003,'page':'album_page'},5,[])):
     m=QueueMachine(**kw); assert m.run(row,steps=1) is None
     assert m.opened[-1]==('localmusic/playlist_page',0x10000|m.get(syms['g_class_type']))
-    assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',1)] and m.names()==['A','B','C']; passed()
+    assert sel(m)==chosen and m.names()==['A','B','C']; passed()
 # Shuffle plays the collection's songs from a random one with shuffle saved, as Shuffle Songs.
 # Then the payload's Shuffle Songs takes the queue over (test/playback.py), so Up Next has an order.
 m=QueueMachine(cls=0xf004,page='localclass_page'); m.handlers[payload_syms['playback_shuffle']]='stock_playback_shuffle'  # a payload call: no t9

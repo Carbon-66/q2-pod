@@ -2093,6 +2093,354 @@ def test_a_pick_after_the_queue_changed_adds_nothing(hold, recs, ui, st, fw):
     assert ui.click(row) == 0 and ui.toasts == ['Queue unchanged'] and log[0] == 0
 
 
+# Add to Playlist's own add (pl_add_songs): a cover, an album, a group or a folder row.
+def picker(hold, recs, ui, fw, playlists=2):
+    """Add to Playlist's picker as stock builds it in add mode: a button a playlist, bound to stock's pick and named
+    by its index in p_deque_playlist. Its rows, there once it opens, and the playlists' records."""
+    headers = [recs(name=f'List {i}', id_=i + 1, disc=i + 1) for i in range(playlists)]
+    fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = hold.deques.new(headers)
+    rows = []
+
+    def open_(ctx):
+        win = ui.window('playlist_page')
+        for i in range(playlists):
+            rows.append(ui.child(win, 'button'))
+            ui.nodes[rows[-1]].name = str(i)
+            ui.bind(rows[-1], EVT_CLICK, PLAYLIST_PICK, rows[-1])
+    ui.routes['localmusic/playlist_page'] = open_
+    return rows, headers
+
+
+def answers(hold, fw, query, songs):
+    """Stock's library query answering songs into the staging deque, as its getMusicBy... do."""
+    fw.mock(query, lambda *_: hold.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(songs) or 0)
+
+
+def selections(fw):
+    """Stock's batch selection as the calls left it: (size, the indices set) a batch_init_selectrecord."""
+    made: list[tuple[int, list[int]]] = []
+    for name, args in fw.calls():
+        if name == 'batch_init_selectrecord':
+            made.append((C.c_int(args[0]).value, []))
+        elif name == 'batch_set_selectitem':
+            made[-1][1].append(C.c_int(args[0]).value)  # one before any record was sized has no record at all
+    return made
+
+
+class Lists:
+    """The playlist table under the menu's own add: batch_add_file writing each song stock's selection holds that the
+    playlist lacks (its copy check), checkPlayListExist, and the count pl_add_songs reads before and after on a
+    connection of its own (library_count). full: stock's insert fails, without a word, as it does; unread: the
+    count can't be had; gone: the songs' files that aren't there, None every one (the card away). calls: each add's
+    (class, the songs selected, cd_num); during runs inside the add."""
+    def __init__(self, hold, fw):
+        self.hold, self.fw, self.rows, self.calls, self.handles = hold, fw, [], [], []
+        self.full = self.unread = False
+        self.during, self.gone = None, set()
+        fw.mock('fw_access', lambda path, *_: -1 if self.gone is None or cstr(path) in self.gone else 0)
+        fw.mock('batch_add_file', self.add)
+        fw.mock('checkPlayListExist', lambda r, dest, *_: (C.c_int(dest).value, field(r, REC_PATH)) in self.rows)
+        fw.mock('sqlite3_open', lambda path, db, *_: setattr(C.c_void_p.from_address(db), 'value', 0x5d))
+        fw.mock('sqlite3_exec', self.exec)
+
+    def add(self, cls, into, songs, select, dest, *_):
+        size, chosen = selections(self.fw)[-1]
+        records, dest = self.hold.deques[songs], C.c_int(dest).value
+        assert into == 0xf00b and size == len(records) and all(0 <= i < size for i in chosen)
+        self.handles.append(songs & 0xffffffff)
+        self.calls.append((cls, [records[i] for i in chosen], dest))
+        if self.during:
+            self.during()
+        for i in chosen:
+            if not self.full and (dest, field(records[i], REC_PATH)) not in self.rows:
+                self.rows.append((dest, field(records[i], REC_PATH)))
+        return 1
+
+    def exec(self, db, sql, callback, ctx, *_):
+        m = re.fullmatch(r'select count\(\*\) from playlist where id>100 and cd_num=(\d+)', cstr(sql))
+        if not m:
+            return 0  # the connection's pragmas
+        if self.unread:
+            return 1
+        row = (C.c_char_p * 1)(b'%d' % sum(dest == int(m[1]) for dest, _ in self.rows))
+        C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.POINTER(C.c_char_p), C.c_void_p)(callback)(ctx, 1, row, None)
+        return 0
+
+    def paths(self, dest):
+        return [p for d, p in self.rows if d == dest]
+
+
+def held_cover(hold, recs, ui, fw, songs):
+    """Cover Flow's covers with a cover held, its album's songs getMusicByAlbum's answer; the menu up."""
+    album = recs(path='/mnt/mmc/Music/a', album='Abbey Road', artist='The Beatles', kind=4, id_=1)
+    cf = cover_flow(fw, ui, 1)  # COVERS
+    hold.slide = C.create_string_buffer(0x100)
+    cf.slide, cf.albums = C.addressof(hold.slide), hold.deques.new([album])
+    answers(hold, fw, 'getMusicByAlbum', songs)
+    hold.hold()
+    hold.menu()
+    return album
+
+
+def test_a_covers_add_to_playlist_never_selects_outside_the_record_it_sized(hold, recs, ui, fw):
+    """The first hold since boot: no row was ever selected, so the menu's index and row count are both 0, and stock's
+    batch_set_selectitem(0) on a record of none writes through its empty vector's NULL."""
+    songs = [song(recs, i, track=i + 1) for i in range(3)]
+    rows, headers = picker(hold, recs, ui, fw)
+    lists = Lists(hold, fw)
+    held_cover(hold, recs, ui, fw, songs)
+    hold.pick('Add to Playlist')
+    assert selections(fw) == []  # a cover is no row of any list: nothing to select as the picker opens
+    ui.click(rows[1])
+    assert selections(fw) == [(3, [0, 1, 2])] and lists.calls == [(0xf001, songs, 2)]
+    assert ui.toasts == ['Added to Playlist'] and ui.top() != ui.nodes[rows[1]].parent
+
+
+def test_the_rows_selection_never_names_an_index_outside_its_record(fw, st):
+    st('qm_idx', C.c_uint).value, st('qm_rows', C.c_uint).value = 5, 3
+    fw.fn('qm_select', None)()
+    assert selections(fw) == [(3, [])]
+
+
+def test_a_song_rows_add_to_playlist_stays_stocks_with_the_row_selected(hold, recs, ui, st, fw):
+    rows, headers = picker(hold, recs, ui, fw)
+    hold.songs_page('allmusic_page', [song(recs, i) for i in range(3)], sel=1)
+    made = len(hold.deques.lists)
+    hold.hold()
+    hold.menu()
+    hold.pick('Add to Playlist')
+    assert selections(fw) == [(3, [1])] and ui.contexts[-1] == ('localmusic/playlist_page', 0x10000 | 0xf001)
+    assert not st('qm_playlist', C.c_void_p).value and len(hold.deques.lists) == made  # its pick is stock's own
+    assert ui.handlers(rows[0], EVT_CLICK) == [PLAYLIST_PICK]
+
+
+# Every row of more than a song adds its own songs, as Play Next queues them.
+def held_row(hold, recs, ui, fw, kind, songs):
+    """A held row of kind whose songs stock's query for it answers; the menu up. The class stock's add takes them as."""
+    if kind == 'folder':
+        C.memmove(C.addressof(fw.var('fw_ctx_g_folder_path', C.c_char)), b'/mnt/mmc/Music\0', 15)
+        hold.songs_page('folder_page', [recs(name=n, kind=4) for n in ('Jazz', 'Rock')], sel=0)
+        fw.mock('toolsLoadDirectory', lambda path, *_: hold.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value]
+                .extend(songs if cstr(path) == '/mnt/mmc/Music/Jazz' else []) or 0)
+    elif kind == 'artist albums':
+        struct.pack_into('<I', classinfo(fw), 0, 0xff01)
+        albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
+        hold.songs_page('artistinfo_page', albums, sel=0, cls=0xf004)
+        answers(hold, fw, 'getMusicByAlbumAndSonger', songs)
+    elif kind == 'albums':
+        albums = [recs(path='/mnt/mmc/Music/a', album=a, artist='The Beatles', kind=4, id_=i + 1)
+                  for i, a in enumerate(('Abbey Road', 'Revolver'))]
+        hold.songs_page('localclass_page', albums, sel=0, cls=0xf003)
+        answers(hold, fw, 'getMusicByAlbum', songs)
+    else:
+        cls, tag, query = {'artist': (0xf004, 'artist', 'getMusicBySonger'),
+                           'composer': (0xf005, 'composer', 'getMusicByComposer'),
+                           'genre': (0xf006, 'genre', 'getMusicByGenre')}[kind]
+        hold.songs_page('localclass_page', [recs(kind=4, **{tag: f'{tag} {i}'}) for i in range(2)], sel=1, cls=cls)
+        answers(hold, fw, query, songs)
+    hold.hold()
+    hold.menu()
+    return 1 if kind == 'folder' else 0xf001
+
+
+ROWS_OF_SONGS = ('artist', 'composer', 'genre', 'artist albums', 'albums', 'folder')
+
+
+@pytest.mark.parametrize('kind', ROWS_OF_SONGS)
+def test_a_row_of_songs_adds_the_songs_play_next_would_queue(hold, recs, ui, st, fw, kind):
+    """Not stock's add of the selected row, which reads the list and the staging deque from a thread of its own while
+    the UI thread's queries point that deque elsewhere."""
+    songs = [song(recs, i, track=i + 1) for i in range(3)]
+    rows, headers = picker(hold, recs, ui, fw)
+    lists = Lists(hold, fw)
+    cls = held_row(hold, recs, ui, fw, kind, songs)
+    hold.pick('Add to Playlist')
+    assert selections(fw) == [] and st('qm_playlist', C.c_void_p).value == ui.top()
+    assert all(ui.handlers(r, EVT_CLICK) == [ui.fn('qm_playlist_pick')] for r in rows)  # never stock's pick
+    ui.click(rows[0])
+    assert lists.calls == [(cls, songs, 1)] and lists.paths(1) == [field(r, REC_PATH) for r in songs]
+    assert ui.toasts == ['Added to Playlist'] and not st('qm_playlist', C.c_void_p).value
+
+
+@pytest.mark.parametrize('kind', ROWS_OF_SONGS + ('cover',))
+@pytest.mark.parametrize('count, toast', [(0, 'Could not save playlist'), (500, None), (501, 'Too many songs to add')])
+def test_add_to_playlist_is_refused_before_the_picker_for_no_songs_or_too_many(hold, recs, ui, st, fw, kind, count, toast):
+    songs = [song(recs, 0)] * count
+    rows, headers = picker(hold, recs, ui, fw)
+    lists = Lists(hold, fw)
+    made = len(hold.deques.lists)
+    if kind == 'cover':
+        held_cover(hold, recs, ui, fw, songs)
+        made += 1  # its covers' list
+    else:
+        held_row(hold, recs, ui, fw, kind, songs)
+        made += 1  # its page's list
+    hold.pick('Add to Playlist')
+    assert ui.toasts == ([toast] if toast else [])
+    assert ('localmusic/playlist_page' in ui.went) == (not toast)
+    assert bool(st('qm_playlist', C.c_void_p).value) == (not toast)
+    assert toast is None or (len(hold.deques.lists) == made and not lists.calls)  # its songs let go, nothing written
+
+
+def added(hold, recs, ui, fw, songs, playlists=2):
+    """A cover's Add to Playlist with its picker up: the picker's rows, the playlists' records and the table."""
+    rows, headers = picker(hold, recs, ui, fw, playlists)
+    lists = Lists(hold, fw)
+    held_cover(hold, recs, ui, fw, songs)
+    hold.pick('Add to Playlist')
+    return rows, headers, lists
+
+
+@pytest.mark.parametrize('name, cd_num, adds', [('0', 1, True), ('7', 1, False), ('', 1, False), ('0', 100, False),
+                                                ('0', -1, False), ('0', 0, True), ('0', 99, True)])
+def test_the_picked_row_must_be_a_playlist_of_the_list(hold, recs, ui, fw, name, cd_num, adds):
+    """Its index within p_deque_playlist and its cd_num a playlist's (0-99: above them the table's rows are songs)."""
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    ui.nodes[rows[0]].name = name
+    struct.pack_into('<i', (C.c_char * 0x60).from_address(headers[0]), O['REC_DISC'], cd_num)
+    assert ui.click(rows[0]) == 0
+    assert bool(lists.calls) == adds and ui.toasts == ['Added to Playlist' if adds else 'Could not save playlist']
+    assert (ui.nodes[rows[0]].parent in ui.stack) == (not adds)  # a refusal leaves the picker for another pick
+
+
+def test_only_songs_with_a_file_there_are_added(hold, recs, ui, fw):
+    good = [song(recs, i, track=i + 1) for i in (0, 3)]
+    folder = recs(path='/mnt/mmc/Music/1', album='Abbey Road', artist='The Beatles', kind=4, track=2)
+    gone = song(recs, 2, track=3)
+    songs = [good[0], folder, gone, good[1]]
+    rows, headers, lists = added(hold, recs, ui, fw, songs)
+    lists.gone = {field(gone, REC_PATH)}
+    ui.click(rows[0])
+    assert selections(fw) == [(4, [0, 3])] and lists.calls == [(0xf001, good, 1)] and ui.toasts == ['Added to Playlist']
+
+
+def test_songs_with_no_file_there_write_nothing(hold, recs, ui, fw):
+    """The card taken out under the picker: stock's tag read never meets a file that isn't there."""
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    lists.gone = None
+    ui.click(rows[0])
+    assert not lists.calls and ui.toasts == ['Could not save playlist'] and ui.nodes[rows[0]].parent in ui.stack
+
+
+def test_an_add_that_wrote_nothing_says_so_and_leaves_the_picker_for_another(hold, recs, ui, st, fw):
+    songs = [song(recs, i, track=i + 1) for i in range(2)]
+    rows, headers, lists = added(hold, recs, ui, fw, songs)
+    lists.full = True
+    ui.click(rows[0])
+    assert ui.toasts == ['Could not save playlist'] and st('qm_playlist', C.c_void_p).value == ui.top()
+    lists.full = False
+    ui.click(rows[1])
+    assert ui.toasts[1:] == ['Added to Playlist'] and lists.paths(2) == [field(r, REC_PATH) for r in songs]
+    assert not st('qm_playlist', C.c_void_p).value and len(lists.calls) == 2
+
+
+def test_songs_the_playlist_holds_already_say_so(hold, recs, ui, st, fw):
+    songs = [song(recs, i, track=i + 1) for i in range(2)]
+    rows, headers, lists = added(hold, recs, ui, fw, songs)
+    lists.rows = [(1, field(r, REC_PATH)) for r in songs]
+    ui.click(rows[0])
+    assert ui.toasts == ['Already in playlist'] and len(lists.rows) == 2 and st('qm_playlist', C.c_void_p).value == ui.top()
+
+
+def test_a_playlist_table_that_cant_be_read_is_not_written(hold, recs, ui, fw):
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    lists.unread = True
+    ui.click(rows[0])
+    assert not lists.calls and ui.toasts == ['Could not save playlist']
+
+
+def test_a_scan_under_the_picker_refuses_the_add(hold, recs, ui, fw):
+    """A scan writes the library on stock's shared connection, from its own thread: an add's inserts would land in its
+    transaction, unseen by the count until it commits."""
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    claim(O['SCAN_THREAD'])
+    saved = C.string_at(O['SCAN_DONE'], 8)
+    try:
+        C.c_int.from_address(O['SCAN_THREAD']).value, C.c_int.from_address(O['SCAN_DONE']).value = 1, 0
+        ui.click(rows[0])
+        assert not lists.calls and ui.toasts == ['Could not save playlist'] and ui.nodes[rows[0]].parent in ui.stack
+    finally:
+        C.memmove(O['SCAN_DONE'], saved, 8)
+
+
+def test_the_add_runs_under_the_watchdogs_long_span(hold, recs, ui, fw):
+    """Three statements a song on the UI thread: the watchdog's usual span would reset the unit mid-add."""
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    wdt = Watchdog(fw)
+    wdt.poll()
+    lists.during = lambda: seen.extend(wdt.calls[1:])
+    seen: list = []
+    ui.click(rows[0])
+    assert seen == [(5, WDT_STOP, None), (5, WDT_START, WDT_LONG_MS)] and lists.calls
+
+
+def during_the_toast(ui, act):
+    """The toast's dialog runs the UI's loop until it closes: act, once, as something that loop ran."""
+    go = ui.go
+
+    def toasted(name, ctx):
+        result = go(name, ctx)
+        if name == 'dialog/msginfo_dialog' and len(ui.toasts) == 1:
+            act()
+        return result
+    ui.go = toasted
+
+
+def test_a_picker_closed_under_the_adds_toast_is_not_closed_again(hold, recs, ui, st, fw):
+    """Home held while the toast shows: the picker and its rows are gone when the toast's loop returns."""
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    win = ui.top()
+    during_the_toast(ui, lambda: ui.close(win))
+    ui.click(rows[0])
+    assert ui.toasts == ['Added to Playlist'] and win not in [a[0] for _, a in fw.calls('window_close')]
+    assert [a[0] & 0xffffffff for _, a in fw.calls('fw_deque_destroy')].count(lists.handles[0]) == 1 and not ui.errors
+
+
+def test_a_second_pick_under_the_adds_toast_adds_nothing(hold, recs, ui, st, fw):
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    during_the_toast(ui, lambda: ui.click(rows[1]))
+    ui.click(rows[0])
+    assert ui.toasts == ['Added to Playlist'] and len(lists.calls) == 1 and not lists.paths(2)
+
+
+def test_a_picker_that_did_not_open_keeps_no_songs(hold, recs, ui, st, fw):
+    made = len(hold.deques.lists) + 1  # the covers' list
+    held_cover(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    hold.pick('Add to Playlist')  # no route: the page under stays on top
+    assert 'localmusic/playlist_page' in ui.went and not st('qm_playlist', C.c_void_p).value
+    assert len(hold.deques.lists) == made
+
+
+def test_leaving_the_picker_lets_the_songs_go(hold, recs, ui, st, fw):
+    made = len(hold.deques.lists) + 2  # the playlists', the covers'
+    rows, headers, lists = added(hold, recs, ui, fw, [song(recs, i, track=i + 1) for i in range(2)])
+    assert len(hold.deques.lists) == made + 1
+    ui.close(ui.top())  # Return, or Home
+    assert len(hold.deques.lists) == made and not st('qm_playlist', C.c_void_p).value and not lists.calls
+
+
+def test_an_albums_rows_add_leaves_the_kept_albums_list_as_it_was(hold, recs, ui, st, fw):
+    """library_lists.c keeps Albums' list while the library is unchanged (albums_again): the add reads the row, stages
+    its songs in a deque of its own and writes the playlist table, so the page coming back shows the rows kept."""
+    songs = [song(recs, i, track=i + 1) for i in range(3)]
+    rows, headers = picker(hold, recs, ui, fw)
+    lists = Lists(hold, fw)
+    held_row(hold, recs, ui, fw, 'albums', songs)
+    show = fw.var('fw_ctx_p_deque_showlist', C.c_uint).value
+    fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value = hold.deques.new()  # stock's staging deque, empty
+    fw.fn('albums_made', None, C.c_int, C.c_uint)(1, fw.var('library_gen', C.c_uint).value)
+    was = [C.string_at(r, O['REC_SIZE']) for r in hold.deques[show]]
+    load = fw.fn('ringnav_localclass', C.c_int, C.c_int)
+    hold.pick('Add to Playlist')
+    load(0xf00b)  # the picker's own load, as its init runs it: Playlists', which fills another deque
+    ui.click(rows[0])
+    assert lists.calls == [(0xf001, songs, 1)] and ui.toasts == ['Added to Playlist']
+    assert load(0xf003) == 2  # the album page back on top: its load again, served from the rows kept
+    assert [a[0] for _, a in fw.calls('stock_localclass_trampoline')] == [0xf00b]
+    assert fw.var('fw_ctx_p_deque_showlist', C.c_uint).value == show
+    assert [C.string_at(r, O['REC_SIZE']) for r in hold.deques[show]] == was
+
+
 # The hold on a list's row.
 def test_holding_play_on_a_song_row_opens_the_songs_menu(hold, recs, ui):
     songs = [song(recs, i) for i in range(3)]
@@ -2204,10 +2552,11 @@ def test_an_artists_albums_tab_holds_as_albums_from_its_own_class(hold, recs, ui
     struct.pack_into('<I', classinfo(fw), 0, 0xff01)  # load_localartist_list's: g_class_type stays the Artists list's
     albums = [recs(album=a, kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
     hold.songs_page('artistinfo_page', albums, sel=0, cls=0xf004)
+    answers(hold, fw, 'getMusicByAlbumAndSonger', [song(recs, 0)])
     hold.hold()
     assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Playlist'] and hold.title() == 'Help!'
     hold.pick('Add to Playlist')
-    assert ui.contexts[-1] == ('localmusic/playlist_page', 0x10000 | 0xff01)  # stock's add, from the tab's albums
+    assert ui.contexts[-1] == ('localmusic/playlist_page', 0x10000 | 0xff01)  # the picker, for the tab's class
 
 
 def test_a_playlist_rows_more_opens_its_dots_page(hold, recs, ui, st, fw, stock_globals):

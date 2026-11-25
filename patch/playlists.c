@@ -560,36 +560,64 @@ int ringnav_playlistsmore(widget_t *win, void *ctx) {
     return result;
 }
 
-/* The row alone selected in the stock batch record, as player_addplayList (0x517d68) does. */
+/* The row alone selected in the stock batch record, as player_addplayList (0x517d68) does. Never
+ * an index outside the record just sized: stock's batch_set_selectitem (0x4ff0c8) writes there
+ * unchecked, and a record of none has no storage (a write through NULL). A cover's hold names no
+ * row, so its menu leaves qm_idx and qm_rows as they were: both 0 after boot. */
 void qm_select(void) {
     batch_init_selectrecord((int)st.qm_rows);
-    batch_set_selectitem((int)st.qm_idx);
+    if (st.qm_idx < st.qm_rows) batch_set_selectitem((int)st.qm_idx);
 }
 
 /* Stock playlist rows use the queue in add mode 2. Guard their final dispatch as well. */
 #define PLAYLIST_PICK ((int (*)(void *, event_t *))0x4b4840)
-static int pl_at(widget_t *button);
-/* An album's songs (qm_own_songs, taken as the picker opened: qm_songs) into the picked playlist,
- * in qm_collect's order, every one selected, through batch_add_file as the editor's add; then the
- * toast and the picker's close, as stock's pick. ponytail: an album's tracks, so no cap; stock's
- * add runs on the UI thread. */
-static int pl_add_songs(widget_t *button, void *songs) {
-    void *lists = P(p_deque_playlist, 0);
-    int at = pl_at(button);
-    void *r = lists && (unsigned)at < deque_size(lists) ? deque_at(lists, (unsigned)at) : 0;
-    unsigned n = songs ? deque_size(songs) : 0;
-    if (r && n) {
+static void *pl_record(widget_t *button);
+/* A row of songs' own (qm_own_songs, taken as the picker opened: qm_songs) into the picked
+ * playlist, in qm_collect's order, through batch_add_file as class cls; then the toast and the
+ * picker's close, as stock's pick from Now Playing (0x4b4a40), which adds on the UI thread too.
+ * Refused, with nothing written: a row that is no playlist of the list (its index, and a cd_num of
+ * 0-99: the table's rows above them are songs), a scan running (it writes on stock's shared
+ * connection from its own thread), a table whose count can't be read, and no song to add. A song
+ * is a record of type 8 whose file is there: stock's add reads a folder file's tags without a look
+ * at the file (0x522e30) and writes a NULL path as text (0x5da894). Stock's insert fails without a
+ * word (batch_add_file returns 1 whatever was written), so the playlist's count before and after
+ * tells, as the editor's add; songs it holds already are stock's copy check's to skip. The songs
+ * go before the toast, whose loop may close the picker or bring a second pick, and stay after a
+ * refusal, for another playlist. ponytail: up to PL_ADD_MAX songs in one pass of the UI thread,
+ * under the watchdog's long span; an add that wrote only some of its songs reads as added. */
+static int pl_add_songs(widget_t *button, int cls) {
+    void *songs = qm_songs(), *r = pl_record(button), *first = 0;
+    int dest = r ? I(r, REC_DISC) : -1, before = -1, added = 0;
+    char sql[80];
+    if (!songs) return 0; /* added already: a second pick under its toast */
+    tk_snprintf(sql, sizeof sql, "select count(*) from playlist where id>100 and cd_num=%d", dest);
+    if ((unsigned)dest < 100 && !library_scanning() && (before = library_count(sql)) >= 0) {
+        unsigned n = deque_size(songs);
         batch_init_selectrecord((int)n);
-        for (unsigned i = 0; i < n; ++i) batch_set_selectitem((int)i);
-        batch_add_file(0xf001, 0xf00b, songs, P(p_vector_select_record, 0), I(r, REC_DISC));
+        for (unsigned i = 0; i < n; ++i) {
+            void *t = deque_at(songs, i);
+            if (I(t, REC_TYPE) != 8 || !P(t, REC_PATH) || access(P(t, REC_PATH), 0)) continue;
+            batch_set_selectitem((int)i);
+            if (!first) first = t;
+        }
+        if (first) {
+            ringnav_wdt_long();
+            batch_add_file(cls, 0xf00b, songs, P(p_vector_select_record, 0), dest);
+            added = library_count(sql) > before;
+        }
     }
-    toast(r && n ? tr("Added to Playlist") : tr("Could not save playlist"));
-    if (r && n) window_close(window_of(button));
+    const char *said = added                                      ? tr("Added to Playlist")
+                       : first && checkPlayListExist(first, dest) ? tr("Already in playlist")
+                                                                  : tr("Could not save playlist");
+    if (added) qm_songs_free();
+    toast(said);
+    if (added && st.qm_playlist) window_close(st.qm_playlist);
     return 0;
 }
 int qm_playlist_pick(void *ctx, event_t *event) {
     char click[0x30];
-    if (qm_own_songs()) return pl_add_songs(ctx, qm_songs());
+    int cls = qm_own_songs();
+    if (cls) return pl_add_songs(ctx, cls);
     if (!qm_record()) {
         toast(tr("Queue unchanged"));
         return 0; /* a STOP would leave the list's scroll_view holding its grab */

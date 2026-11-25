@@ -76,14 +76,22 @@ static widget_t *qm_under(void) {
                                           : window_manager_get_top_window(window_manager());
 }
 
-/* An album the picker adds as Play Next queues it (qm_collect), not as stock's add would: a
- * Coverflow cover, which has no showlist row, and an Albums row, whose stock add takes every album
- * of the name. */
+/* A row of more than a song, which the picker adds as Play Next queues it (qm_collect) on the UI
+ * thread (playlists.c pl_add_songs), not as stock's add of the selected row would: that runs on a
+ * thread of stock's (0x4b4750), where batch_add_file (0x4ff344) fills and reads the staging deque
+ * staged_into points elsewhere from the UI thread, adds without a limit, and for an Albums row
+ * takes every album of the name; a Coverflow cover has no showlist row at all. The class stock's
+ * add takes the songs as: a folder's files 1, their tags read from each file as stock's folder
+ * add reads them (0x4ff918), any other row's 0xf001. 0 for a song's own row, in a list or
+ * playing, whose add stays stock's. */
 int qm_own_songs(void) {
-    return qm.qm_kind == QM_COVERALBUM || (qm.qm_kind == QM_ALBUM && qm.qm_cls == CLASS_ALBUMS);
+    return qm.qm_kind == QM_SONG || qm.qm_kind == QM_PLAYING ? 0
+           : qm.qm_kind == QM_FOLDER                         ? 1
+                                                             : 0xf001;
 }
 
-/* Add to Playlist's album songs (qm_own_songs), kept from the menu until the picker goes. */
+/* Add to Playlist's songs for such a row (qm_own_songs), kept from the menu until they are added
+ * or the picker goes. */
 void *qm_songs(void) { return qm.qm_songs; }
 void qm_songs_free(void) {
     if (qm.qm_songs) deque_destroy(qm.qm_songs);
@@ -383,21 +391,30 @@ static int qm_run(const void *unused) {
         if (cls == 0xf00a)
             g_delete_flag = 1;          /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST) { /* the playlist page's add mode adds the selected row */
+        unsigned n = 1;
         qm_songs_free();
-        /* an album's songs now: the picker covers its page, so its row can't be read at the pick */
-        if (qm_own_songs()) qm.qm_songs = qm_collect(r);
-        qm_select();
+        /* a row of songs' own now: the picker covers its page, so its row can't be read at the
+         * pick. None, or more than one add writes (PL_ADD_MAX), is refused before the picker. */
+        if (qm_own_songs())
+            n = deque_size(qm.qm_songs = qm_collect(r));
+        else
+            qm_select();
+        if (!n || n > PL_ADD_MAX) {
+            qm_songs_free();
+            toast(n ? tr("Too many songs to add") : tr("Could not save playlist"));
+            return 0;
+        }
         navigator_to_with_context(
             "localmusic/playlist_page",
             (void *)(long)((qm.qm_kind == QM_PLAYING ? 0x20000 : 0x10000) | cls));
-        if (qm.qm_kind == QM_PLAYING || qm_own_songs()) {
-            widget_t *top = window_manager_get_top_window(window_manager());
-            if (!tk_strcmp(widget_get_prop_str(top, "name", ""), "playlist_page")) {
-                st.qm_playlist = top;
-                qm_playlist_bind(top, 0, qm_playlist_pick);
-                widget_on(top, EVT_DESTROY, qm_playlist_gone, top);
-            }
-        }
+        widget_t *top = window_manager_get_top_window(window_manager());
+        if (qm.qm_kind != QM_SONG &&
+            !tk_strcmp(widget_get_prop_str(top, "name", ""), "playlist_page")) {
+            st.qm_playlist = top;
+            qm_playlist_bind(top, 0, qm_playlist_pick);
+            widget_on(top, EVT_DESTROY, qm_playlist_gone, top);
+        } else /* no picker came up to pick their playlist */
+            qm_songs_free();
     } else if (r && a == QA_RESUME) { /* the list's songs from the chapter; the poll seeks */
         int at = 0, off = 0;
         void *list = qm_list(), *t = book_place(list, r, &at, &off), *songs;
