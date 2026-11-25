@@ -471,8 +471,7 @@ int songs_open(const char *path, const char *title, int album) {
  * tab a row per year, newest first, and a decade's or year's albums by year. An album's year is its
  * tracks' latest, as Coverflow's Year sort; undated albums and the untagged have none. ponytail: no
  * covers, and the album rows have no hold menu; the decade as a scoped Coverflow, if asked for. */
-#define ERA_DECADES 32
-#define ERA_YEARS 128 /* the newest kept */
+#define ERA_ROWS 128 /* a tab's rows: the oldest decades kept, or the newest years */
 /* Albums counted per key (year/10*10 a decade, year a year), each album dated as the albums query
  * dates it. */
 #define ERA_COUNT(key, order)                                                                      \
@@ -482,12 +481,12 @@ int songs_open(const char *path, const char *title, int album) {
     "select album,ifnull(nullif(albumsonger,''),songer)," ALBUM_YEAR                               \
     " as release_year," ALBUM_TRACK " from songtable "                                             \
     "where " MUSIC_WHERE " and ifnull(album,'')<>''"
-/* Only a name with a song dated in the decade can make one of its groups, so era_open_decade and
+/* Only a name with a song dated in the decade can make one of its groups, so era_open and
  * era_shuffle_songs group only those names' songs, as of_names does (coverflow.c). SONG_YEAR holds
  * no '%', so it sits in the format; MUSIC_WHERE's like patterns do, so it stays an argument.
  * ponytail: the names' subquery reads the table once more, so a decade holding most of the library
  * groups nearly every song anyway and takes a little longer than with no filter; skip the filter
- * when era.count shows the decade holds most of the albums. */
+ * when the row's count shows the decade holds most of the albums. */
 #define ERA_NAMES                                                                                  \
     " and album collate nocase in (select album from songtable where " SONG_YEAR                   \
     " between %d and %d)"
@@ -495,13 +494,17 @@ typedef struct {
     char *album, *artist, *path;
     int year;
 } era_t;
+/* A tab's rows: each decade's or year's first year (at) and its albums (count). */
+typedef struct {
+    int at[ERA_ROWS], count[ERA_ROWS], n;
+} era_rows_t;
 static struct {
     widget_t *page, *albums; /* the decades page, a decade's page */
-    int decade[ERA_DECADES], count[ERA_DECADES], n;
+    /* the Decades tab's, oldest first, read at the page's open; the Years tab's, newest first,
+     * read at its first open */
+    era_rows_t rows[2];
     era_t *v; /* the open decade's albums, oldest first, room for cap */
     unsigned m, cap;
-    int year[ERA_YEARS], ycount[ERA_YEARS],
-        ny;            /* the Years tab's, newest first, read at its open */
     int tab, from, to; /* the page's tab (0 Decades, 1 Years); the open albums page's years */
 } era __attribute__((section(".scratch")));
 
@@ -527,14 +530,11 @@ int library_count(const char *sql) {
     int n = 0;
     return era_sql(sql, count_row, &n) ? n : -1;
 }
-static int era_decade_row(void *ctx, int n, char **v, char **c) {
-    if (n == 2 && v[0] && v[1] && era.n < ERA_DECADES)
-        era.decade[era.n] = atoi(v[0]), era.count[era.n++] = atoi(v[1]);
-    return 0;
-}
-static int era_year_row(void *ctx, int n, char **v, char **c) {
-    if (n == 2 && v[0] && v[1] && era.ny < ERA_YEARS)
-        era.year[era.ny] = atoi(v[0]), era.ycount[era.ny++] = atoi(v[1]);
+/* A row of ERA_COUNT's into ctx, an era_rows_t. */
+static int era_row(void *ctx, int n, char **v, char **c) {
+    era_rows_t *r = ctx;
+    if (n == 2 && v[0] && v[1] && r->n < ERA_ROWS)
+        r->at[r->n] = atoi(v[0]), r->count[r->n++] = atoi(v[1]);
     return 0;
 }
 static int era_album_row(void *ctx, int n, char **v, char **c) {
@@ -561,12 +561,14 @@ static int era_closed(void *ctx, event_t *event) {
     if (ctx == era.albums) era.albums = 0, era_free();
     return 0;
 }
-/* "60s" to "90s", then "2000s" on, in the language's words. */
-static const char *era_name(char *buf, unsigned size, int decade) {
-    if (decade < 2000)
-        tk_snprintf(buf, size, tr("%02ds"), decade % 100);
+/* A row's name: "60s" to "90s", then "2000s" on, in the language's words; a year on Years. */
+static const char *era_name(char *buf, unsigned size, int at) {
+    if (era.tab)
+        tk_snprintf(buf, size, "%d", at);
+    else if (at < 2000)
+        tk_snprintf(buf, size, tr("%02ds"), at % 100);
     else
-        tk_snprintf(buf, size, tr("%ds"), decade);
+        tk_snprintf(buf, size, tr("%ds"), at);
     return buf;
 }
 
@@ -683,42 +685,34 @@ static void era_open(int from, int to, int count, const char *name) {
         page_row_detail_into(view, (int)i + 2, era.v[i].album, detail, era_pick);
     }
 }
-static int era_open_decade(void *ctx, event_t *event) {
+/* The open tab's row ctx: its decade's or year's albums. */
+static int era_open_row(void *ctx, event_t *event) {
     char name[48];
-    int k = (int)(long)ctx;
-    era_open(era.decade[k], era.decade[k] + 9, era.count[k],
-             era_name(name, sizeof name, era.decade[k]));
-    return 0;
-}
-static int era_open_year(void *ctx, event_t *event) {
-    char name[16];
-    int k = (int)(long)ctx;
-    tk_snprintf(name, sizeof name, "%d", era.year[k]);
-    era_open(era.year[k], era.year[k], era.ycount[k], name);
+    const era_rows_t *r = &era.rows[era.tab];
+    int k = (int)(long)ctx, at = r->at[k];
+    era_open(at, era.tab ? at : at + 9, r->count[k], era_name(name, sizeof name, at));
     return 0;
 }
 static const char *const era_tabs[2] = { N_("Decades"), N_("Years") };
 static void era_tab(int tab);
 /* The open tab's rows under the tabs: a decade's or a year's name, its album count under it. */
 static void era_rows(void) {
-    int years = era.tab, n = years ? era.ny : era.n;
-    widget_t *view = page_list(era.page, era.page, 0, tr("Era"), n, 64);
+    const era_rows_t *r = &era.rows[era.tab];
+    widget_t *view = page_list(era.page, era.page, 0, tr("Era"), r->n, 64);
     static const int no_badges[2];
     store_tabs_set(store_tabs(era.page, view, era_tabs, era_tab), era.tab, no_badges);
     char name[48], detail[64];
-    for (int i = 0; i < n; ++i) {
-        unsigned count = (unsigned)(years ? era.ycount[i] : era.count[i]);
+    for (int i = 0; i < r->n; ++i) {
+        unsigned count = (unsigned)r->count[i];
         tk_snprintf(detail, sizeof detail, count == 1 ? tr("%u album") : tr("%u albums"), count);
-        if (years) tk_snprintf(name, sizeof name, "%d", era.year[i]);
-        page_row_detail_into(view, i, years ? name : era_name(name, sizeof name, era.decade[i]),
-                             detail, years ? era_open_year : era_open_decade);
+        page_row_detail_into(view, i, era_name(name, sizeof name, r->at[i]), detail, era_open_row);
     }
 }
 /* 0 Decades, 1 Years: the tab's tap or Previous and Next (app_store.c). The years are read at the
  * Years tab's first open, so Era opens as fast as before. */
 static void era_tab(int tab) {
     if (!era.page || tab == era.tab) return;
-    if (tab && !era.ny && !era_sql(ERA_COUNT("year", " desc"), era_year_row, 0)) {
+    if (tab && !era.rows[1].n && !era_sql(ERA_COUNT("year", " desc"), era_row, &era.rows[1])) {
         toast(tr("Era unavailable"));
         return;
     }
@@ -727,12 +721,12 @@ static void era_tab(int tab) {
 }
 int era_menu(void *ctx, event_t *event) {
     if (era.page) return 0;
-    era.n = era.ny = era.tab = 0;
-    if (!era_sql(ERA_COUNT("year/10*10", ""), era_decade_row, 0)) {
+    era.rows[0].n = era.rows[1].n = era.tab = 0;
+    if (!era_sql(ERA_COUNT("year/10*10", ""), era_row, &era.rows[0])) {
         toast(tr("Era unavailable"));
         return 0;
     }
-    if (!era.n) {
+    if (!era.rows[0].n) {
         toast(tr("No dated albums yet"));
         return 0;
     }
