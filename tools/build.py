@@ -312,13 +312,12 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f /tmp/rtk_init_success /tmp/bt_startup
             /usr/bin/cmd_gpio set_func PD20 output0
         }}
-        rockbox() {{ app rockbox rockbox; }}
         if [ "$(cat /mnt/data/boot-target 2>/dev/null)" = rockbox ] && ! /usr/bin/q2boot; then
             for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
                 [ -e /tmp/mmc_add ] && break
                 usleep 200000
             done
-            rockbox
+            app rockbox rockbox
         fi
         # Every register in the kernel log when a signal ends demo or a helper (show_regs), where a fault otherwise
         # leaves its address, epc and ra alone; the crash log keeps the log's end (docs/boot.md#apps-that-take-over-the-device)

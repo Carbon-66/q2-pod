@@ -1571,7 +1571,7 @@ change on either shows on the other.
 `switch_charge_enable` is guarded (`charge_apply` calls `toolsGpioSetValue` itself). Stock's direct `toolsGpioSetValue("PE22", ...)` writes (`into_poweroff`,
 `device_reboot`, `device_standby`, `check_otg_status`) and other GPIOs pass through, so power-off, reboot
 and Standby still release the pin for a charge with the Q2 off; the next `ringnav_usb_status` poll
-inhibits again. `S90play`'s `rockbox()` sets PE22 low before Rockbox starts, which never drives it. A mutex serializes
+inhibits again. `S90play`'s `app()` sets PE22 low before Rockbox starts, which never drives it. A mutex serializes
 the policy and GPIO writes. A caller's disable request remains disabled through detection and
 mode reconciliation, so the existing charge-limit hold is not undone by these paths. Detection
 rechecks PE22 and corrects a mismatched readback. `ringnav_usb_status` reconciles immediately before
