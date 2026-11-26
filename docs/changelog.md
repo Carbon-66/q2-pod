@@ -1,6 +1,7 @@
 # Changelog
 
 - **1.9.5**:
+  - Bluetooth: an Xbox One S or Xbox Wireless controller on Classic Bluetooth works with the Q2. Pair it from **Bluetooth**; after that it connects whenever you turn it on. The D-pad or left stick turns the wheel, A is Centre, B or View is Return, Menu or Y is Play/Pause, and LB, RB or the D-pad across are Previous and Next. Games that support controllers read it directly, with both sticks and the triggers; hold the Xbox button to leave a game.
   - Library: going back to **Albums** from an album, Now Playing or the hold menu shows the list at once, unless the library has changed or is updating. It used to read and sort the whole library again each time.
 - **1.9.4**:
   - Playlists: holding Play/Pause on a Cover Flow cover offers **Add to Playlist**, which adds that album's songs. From an **Albums** row it adds only that album, not every album with the same name.

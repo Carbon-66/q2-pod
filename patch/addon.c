@@ -426,6 +426,19 @@ static struct {
     unsigned loads;
 } qa;
 
+/* A Bluetooth controller the game reads itself (q2pad, patch/pad.c) presses none of the Q2's
+ * controls, so its use reaches this host only as PAD_SEEN's mtime, which q2pad sets at most every
+ * 2 s while it does: a new mtime is input, for GAME_IDLE_MS. */
+#define PAD_SEEN "/tmp/q2pad.seen"
+static long pad_mtime;
+
+static int pad_used(void) {
+    unsigned st[36];
+    if (__xstat(3, PAD_SEEN, st) || (long)st[16] == pad_mtime) return 0;
+    pad_mtime = (long)st[16]; /* o32 stat: st_mtime is word 16, as changed() reads it */
+    return 1;
+}
+
 /* Whether path changed since the last look that came well after its change.
  * ponytail: only once it changes (o32 stat, st_mtime word 16), not a scan every poll; a scan in the
  * second of a change is not trusted, as a file could land later in that second. */
@@ -1395,6 +1408,7 @@ static void game_poll(void) {
         dgram_send(&gm.sock, gm.path, m, strlen(m));
         gm.seen = time_now_ms();
     }
+    if (pad_used()) gm.seen = time_now_ms();
     /* behind Now Playing the screen sleeps and Auto power-off counts on their timers; standby,
      * which unmounts the card, waits while the game runs from it */
     reset_poweroptions_timer(1, !gm.native, !gm.native);
